@@ -10,6 +10,7 @@ static size_t (*orig_fwrite)(const void *ptr, size_t size, size_t nmemb, FILE *s
 static int (*orig_close)(int fildes) = NULL;
 static int (*orig_fclose)(FILE *fp) = NULL;
 static int (*orig_fileno)(FILE *stream) = NULL;
+static int (*orig_rename)(const char *old, const char *new) = NULL;
 
 int open(const char *pathname, int flags)
 {
@@ -173,5 +174,67 @@ int fileno(FILE *stream)
         return orig_fileno(stream);
     }
 }
+
+int rename(const char *old, const char *new)
+{
+    if (orig_rename == NULL)
+    {
+        void *handle = dlopen("libc.so.6", RTLD_LAZY);
+        
+        if (handle != NULL)
+        {
+            orig_rename = dlsym(handle, "rename");
+        }
+    }
+
+    if (orig_rename != NULL)
+    {
+        printf("***rename*** from %s to %s\n", old, new);
+        return orig_rename(old, new);
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

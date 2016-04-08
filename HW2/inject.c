@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <sys/types.h>
 
-static int (*orig_open)(const char *pathname, int flags, mode_t mode) = NULL;
+static int (*orig_open)(const char *pathname, int flags) = NULL;
 static FILE *(*orig_fopen)(const char *path, const char *mode) = NULL;
 static ssize_t (*orig_read)(int fildes, void *buf, size_t nbyte) = NULL;
 static size_t (*orig_fread)(void *ptr, size_t size, size_t nmemb, FILE *stream) = NULL;
@@ -11,7 +11,7 @@ static int (*orig_close)(int fildes) = NULL;
 static int (*orig_fclose)(FILE *fp) = NULL;
 static int (*orig_fileno)(FILE *stream) = NULL;
 
-int open(const char *pathname, int flags, mode_t mode)
+int open(const char *pathname, int flags)
 {
     if(orig_open == NULL)
     {
@@ -25,8 +25,9 @@ int open(const char *pathname, int flags, mode_t mode)
 
     if (orig_open != NULL) 
     {
-        fprintf(stderr, "***kshuang Open***\n");
-        return orig_open(pathname,flags,mode);
+        /*fprintf(stderr, "***kshuang Open***\n");*/
+        printf("***open*** path:%s, flags:%d\n", pathname, flags);
+        return orig_open(pathname, flags);
     }
 }
 
@@ -45,8 +46,9 @@ FILE *fopen(const char *path, const char *mode)
 
     if (orig_fopen != NULL) 
     {
-        fprintf(stderr, "***kshuang fopen***\n");
-        return orig_fopen(path,mode);
+        /*fprintf(stderr, "***kshuang fopen***\n");*/
+        printf("***fopen*** path:%s, mode:%s\n", path, mode);
+        return orig_fopen(path, mode);
     }
 }
 
@@ -64,8 +66,9 @@ ssize_t read(int fildes, void *buf, size_t nbyte)
 
     if (orig_read != NULL) 
     {
-        fprintf(stderr, "***kshuang Read***\n");
-        return orig_read(fildes,buf,nbyte);
+        /*fprintf(stderr, "***kshuang Read***\n");*/
+        printf("***read*** file descriptor:%d, size:%zu\n", fildes, nbyte);
+        return orig_read(fildes, buf, nbyte);
     }
 }
 
@@ -83,8 +86,9 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream)
 
     if (orig_fread != NULL)
     {
-        fprintf(stderr, "***kshuang fread***\n");
-        return orig_fread(ptr,size,nmemb,stream);
+        /*fprintf(stderr, "***kshuang fread***\n");*/
+        printf("***fread*** ptr:%s, size:%zu, nmemb:%zu\n", ptr, size, nmemb);
+        return orig_fread(ptr, size, nmemb, stream);
     }
 }
 
@@ -103,8 +107,8 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
     if (orig_fwrite != NULL)
     {
         //fprintf(stderr, "***kshuang fwrite***\n");
-        printf("***kshuang fwrite***\n");
-        return orig_fwrite(ptr,size,nmemb,stream);
+        printf("***fwrite*** size:%zu, nmemb:%zu\n", size, nmemb);
+        return orig_fwrite(ptr, size, nmemb, stream);
     }
 }
 
@@ -123,7 +127,8 @@ int close(int fildes)
 
     if (orig_close != NULL)
     {
-        fprintf(stderr, "***kshuang close***\n");
+        /*fprintf(stderr, "***kshuang close***\n");*/
+        printf("***close*** file descriptor:%d\n", fildes);
         return orig_close(fildes);
     }
 }
@@ -143,7 +148,8 @@ int fclose(FILE *fp)
 
     if (orig_fclose != NULL)
     {
-        fprintf(stderr, "***kshuang fclose***\n");
+        /*fprintf(stderr, "***kshuang fclose***\n");*/
+        printf("***fclose***\n");
          return orig_fclose(fp);
     }
 }
@@ -162,7 +168,8 @@ int fileno(FILE *stream)
 
     if (orig_fileno != NULL)
     {
-        fprintf(stderr, "***kshuang fileno***\n");
+        /*fprintf(stderr, "***kshuang fileno***\n");*/
+        printf("***fileno***\n");
         return orig_fileno(stream);
     }
 }

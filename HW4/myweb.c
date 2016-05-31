@@ -3,32 +3,40 @@
  * Date: 2016.05.27
  */
 
-#include<stdio.h>
-#include<stdlib.h>
-#include<string.h>
-#include<unistd.h>
-#include<sys/types.h>
-#include<sys/socket.h>
-#include<netdb.h>
-#include<netinet/in.h>      /* For Freebsd*/
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <netinet/in.h>      /* For Freebsd*/
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #define MAXCONN 1000
 
 
 void startServer(char *);
-void respond(int)
+char* parseReq(int, char *);
+int regDir(char *);
+int getResource(char *);
+void respond(int, int, char *);
+
 /* clients[] is used to save socket file descriptors from client connect */
 int clients[MAXCONN];
 
 /* socket file descriptors connect to client */
 int sockfd;
 
+/* HTTP Content-Type Structure*/
 struct contype
 {
     char *ext;
     char *filetype;
 };
 
+/* Content-Type support in myweb */
 struct contype extensions[]={
     {"txt" , "text/html" },
     {"htm" , "text/html" },
@@ -39,7 +47,7 @@ struct contype extensions[]={
     {"ogg" , "audio/ogg" },
     {"mp4" ,"vedio/mpeg4"},
     {0, 0},
-}
+};
 
 int main(int argc, char const* argv[])
 {
@@ -59,6 +67,7 @@ int main(int argc, char const* argv[])
     char *docroot = malloc(strlen(argv[2]));
     strcpy(docroot, argv[2]);
 
+    /* init clients fd with -1 */
     int clicount;
     for ( clicount = 0; clicount < MAXCONN; clicount++)
     {
@@ -69,7 +78,7 @@ int main(int argc, char const* argv[])
     
     struct sockaddr_in clientaddr;
     socklen_t addrlen;
-    int slot = 0;
+    int slot = 0;           /* record which clients in used now */
 
     /* Accept connections */
     while(1)
@@ -83,10 +92,34 @@ int main(int argc, char const* argv[])
         }
         else
         {
-            /* fork a child to respond request */
+            /* fork a child to handle client request */
             if(fork() == 0)
             {
-                respond(slot);
+                char *respath=parseReq(slot, docroot);
+    			
+                int isdir=regDir(respath);
+                int resfd;
+
+                if(isdir == -1)
+	            {
+	                fprintf(stderr,"resource is not dir or reg file");
+	                //respond()
+                }
+	            else if(isdir == 1)		/* request resource is Directory */
+	            {
+	                //resfd=getDirResource(respath);
+	            }
+	            else					/* request resource is regular file */
+	            {
+	                resfd=getResource(respath);
+                }
+
+                respond(clients[slot], resfd, respath);
+
+
+                shutdown (clients[slot], SHUT_RDWR);
+                close(slot);
+                clients[slot] = -1;
                 exit(0);
             }
         }
@@ -158,10 +191,10 @@ void startServer(char *port)
     }
 }
 
-void respond(int clientfd)
+char* parseReq(int clientfd, char *docroot)
 {
     char message[99999], *reqline[3];
-    int recvstatus, resourcefd;
+    int recvstatus;
 
     memset( (void*)message, (int)'\0', 99999 );
     recvstatus = recv(clients[clientfd], message, 99999, 0);
@@ -176,15 +209,148 @@ void respond(int clientfd)
     }
     else
     {
-        reqline[0] = strtok(message, " \t\n");
+        reqline[0] = strtok(message, " \t\n");          /* HTTP method */
 
+        /* we only support GET method in myweb */
         if(strncmp(reqline[0], "GET\0", 4) == 0)
         {
-            reqline[1] = strtok(NULL, " \t");
-            reqline[2] = strtok(NULL, " \t\n");
+            reqline[1] = strtok(NULL, " \t");           /* get request resource path */
+            reqline[2] = strtok(NULL, " \t\n");         /* HTTP protocol */
 
+            /* remove string after question mark in resource path */
+            char *ques;
+            ques = strchr(reqline[1], '?');
+            if(ques != NULL)
+            {
+                *ques = '\0';
+            }
 
+            /* default file is index.html */
+            if(strncmp(reqline[1], "/\0", 2) == 0)
+            {
+                reqline[1] = "/index.html";
+            }
+
+            fprintf(stdout,"%s\n",reqline[0]);
+            fprintf(stdout,"%s\n",reqline[1]);
+            fprintf(stdout,"%s\n",reqline[2]);
+
+            /* check whether resource path end with '/' */
+            int reslen = strlen(reqline[1]);
+            if(reqline[1][reslen-1] == '/')
+            {
+                /* remove '/' char at the end of resource path */
+                reqline[1][reslen-1] = '\0';
+            }
+            else
+            {
+                //fprintf(stdout,"Last one char in resource path is: %c\n",reqline[1][reslen-1]);
+            }
+
+            /* get last entry from resource path */
+            char *lastentry = strrchr(reqline[1], '/') ;
+            int entrylen = strlen(lastentry);                   /* get last entry length */
+            //char *reqpath = malloc(reslen-entrylen+1);          /* request path is resource path without last entry */
+            //strncpy(reqpath, reqline[1], reslen-entrylen+1);    /* get request path */
+            //reqpath[reslen-entrylen] = '\0';                    /* end with '\0' */
+
+            //fprintf(stdout, "lastentry: %s\n", lastentry);
+            //fprintf(stdout, "reqpath: %s\n", reqpath);
+
+            char *fullpath = strcat(docroot, reqline[1]);
+            fprintf(stdout, "fullpath: %s\n", fullpath);
+	        return fullpath;
         }
     }
 
+	return NULL;
+}
+
+int regDir(char *path)
+{
+    /* get request file stat */
+    struct stat filestat;
+    if(stat(path, &filestat) != 0)
+    {
+        fprintf(stderr, "stat error\n");
+    }
+
+    if(S_ISREG(filestat.st_mode))           /* request file is a regular file */
+    {
+        fprintf(stdout,"%s is a regural file",path);
+	    return 1;
+        /* 如果不是資料夾 直接 call getResource() */
+        /* 檢查檔案或資料夾是否存在與是否能存取，這裡處理掉 403/404 */
+    }
+    else if(S_ISDIR(filestat.st_mode))      /* request file is a directory */
+    {
+        fprintf(stdout,"%s is a directory",path);
+	    return 0;
+        /* 檢查有 slash 可以處理 301 */
+        /* call getDirResource() 處理有 index.html 和沒有的情況 */
+    } 
+
+	return -1;
+}
+
+int getResource(char *path)
+{
+    if(access(path, F_OK) == -1)        /* file not exist */
+    {
+        return -2;
+    }
+    else if(access(path, R_OK) == -1)   /* file exist but not allow read access */
+    {
+        return -3;
+    }
+	else
+	{
+	    return open(path, O_RDONLY);
+	}
+}
+
+void respond(int clientfd, int resfd, char *path)
+{
+    char buffer[1024];
+    
+    if(resfd == -1)			/* exist and readable but open error */
+    {
+	    
+    }
+    else if(resfd == -2)	/* not exist */
+	{
+        sprintf(buffer,"HTTP/1.1 403 FORBIDDEN\n");
+        send(clientfd, buffer, strlen(buffer), 0);
+    }
+    else if(resfd == -3)	/* exist but not readable */
+    {
+        sprintf(buffer,"HTTP/1.1 404 NOT FOUND\n");
+	    send(clientfd, buffer, strlen(buffer), 0);
+    }
+    else					/* exist and readable */
+	{
+	    int i, extlen, pathlen=strlen(path);
+        char *resext = (char *)0;
+
+	    for(i = 0; extensions[i].ext != 0; i++)
+        {
+            extlen = strlen(extensions[i].ext);
+            if(strncmp(&path[pathlen-extlen], extensions[i].ext, extlen) == 0)
+            {
+                resext = extensions[i].filetype;
+                break;
+            }
+        }
+
+        if(resext == 0)
+        {
+            sprintf(buffer,"HTTP/1.1 200 OK\n");
+	        send(clientfd, buffer, strlen(buffer), 0);
+        }
+        else
+        {
+            sprintf(buffer,"HTTP/1.1 200 OK\nContent-Type: %s\n\n", resext);
+	        send(clientfd, buffer, strlen(buffer), 0);
+        }
+    }
 }

@@ -30,6 +30,9 @@ int clients[MAXCONN];
 /* socket file descriptors connect to client */
 int sockfd;
 
+/* host for 301 redirect */
+char *host;
+
 /* HTTP Content-Type Structure*/
 struct contype
 {
@@ -179,7 +182,7 @@ void startServer(char *port)
 
 char* parseReq(int clientfd, char *docroot)
 {
-    char message[99999], *reqline[3];
+    char message[99999], *reqline[4];
     int recvstatus;
 
     memset( (void*)message, (int)'\0', 99999 );
@@ -202,6 +205,8 @@ char* parseReq(int clientfd, char *docroot)
         {
             reqline[1] = strtok(NULL, " \t");           /* get request resource path */
             reqline[2] = strtok(NULL, " \t\n");         /* HTTP protocol */
+            strtok(NULL," \t");                         /* parse "HOST:" */
+            reqline[3] = strtok(NULL, " \t\n");         /* get host content */
 
             /* remove string after question mark in resource path */
             char *ques;
@@ -221,17 +226,6 @@ char* parseReq(int clientfd, char *docroot)
             //fprintf(stdout,"%s\n",reqline[1]);
             //fprintf(stdout,"%s\n",reqline[2]);
 
-            /* check whether resource path end with '/' */
-            int reslen = strlen(reqline[1]);
-            if(reqline[1][reslen-1] == '/')
-            {
-                /* remove '/' char at the end of resource path */
-                reqline[1][reslen-1] = '\0';
-            }
-            else
-            {
-                //fprintf(stdout,"Last one char in resource path is: %c\n",reqline[1][reslen-1]);
-            }
 
             /* get last entry from resource path */
             char *lastentry = strrchr(reqline[1], '/') ;
@@ -242,7 +236,8 @@ char* parseReq(int clientfd, char *docroot)
 
             //fprintf(stdout, "lastentry: %s\n", lastentry);
             //fprintf(stdout, "reqpath: %s\n", reqpath);
-
+            
+            host = reqline[3];
             char *fullpath = strcat(docroot, reqline[1]);
             fprintf(stdout, "fullpath: %s\n", fullpath);
 	        return fullpath;
@@ -263,12 +258,12 @@ int regDir(char *path)
 
     if(S_ISREG(filestat.st_mode))           /* request file is a regular file */
     {
-        fprintf(stdout,"%s is a regural file",path);
+        fprintf(stdout,"%s is a regural file\n",path);
 	    return 0;
     }
     else if(S_ISDIR(filestat.st_mode))      /* request file is a directory */
     {
-        fprintf(stdout,"%s is a directory",path);
+        fprintf(stdout,"%s is a directory\n",path);
 	    return 1;
         /* 檢查有 slash 可以處理 301 */
         /* call getDirResource() 處理有 index.html 和沒有的情況 */
@@ -362,5 +357,18 @@ void respondReg(int clientfd, char *path)
 
 void respondDir(int clientfd, char *path)
 {
+    char buffer[1024];
 
+    /* check whether resource path end with '/' */
+    int reslen = strlen(path);
+    if(path[reslen-1] == '/')
+    {
+        
+    }
+    else
+    {
+        sprintf(buffer,"HTTP/1.1 301 Moved Permanently\nContent-Type: text/html\nLocation: http://%s%s/\n\n<h1>301 Moved Permanently</h1>",host,path);
+        send(clientfd, buffer, strlen(buffer), 0);
+    }
+    
 }

@@ -298,14 +298,14 @@ void respond(int clientfd, int respm, char *path)
     if(respm == -1)	/* not exist */
 	{
         fprintf(stderr,"403 FORBIDDEN\n");
-        sprintf(buffer,"HTTP/1.1 403 FORBIDDEN\n");
+        sprintf(buffer,"HTTP/1.1 403 Forbidden\nContent-Type: text/html\n\n<h1>403 Forbidden</h1>\n");
         send(clientfd, buffer, strlen(buffer), 0);
         return;
     }
     else if(respm == -2)	/* exist but not readable */
     {
         fprintf(stderr,"404 NOT FOUND\n");
-        sprintf(buffer,"HTTP/1.1 404 NOT FOUND\n");
+        sprintf(buffer,"HTTP/1.1 404 Not Found\nContent-Type: text/html\n\n<h1>404 Not Found</h1>\n");
 	    send(clientfd, buffer, strlen(buffer), 0);
         return;
     }

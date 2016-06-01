@@ -16,14 +16,14 @@
 
 #define MAXCONN 1000
 
+void startServer(char *);           /* Start web server listen on port */
+char* parseReq(int, char *);        /* parse client request to split host and resource path from url, return fullpath content docroot and resource path */
+int regDir(char *);                 /* return 0 if given path is a regular file, 1 if directory, else -1 */
+int checkResource(char *);          /* return -1 if resource is not exist, -2 if resource exist but can't access */
+void respond(int, int, char *);     /* respond 403 if not exist, 404 if can't access ( only for regular file, INTENTIONALLY in this homework) */
+void respondReg(int, char *);       /* respond 200 and correct content-type to client */
+void respondDir(int, char *);       /* if request path not end with / respond 301, if dir have index.html respond 200, else  respond ls -lan result */
 
-void startServer(char *);
-char* parseReq(int, char *);
-int regDir(char *);
-int checkResource(char *);
-void respond(int, int, char *);
-void respondReg(int, char *);
-void respondDir(int, char *);
 /* clients[] is used to save socket file descriptors from client connect */
 int clients[MAXCONN];
 
@@ -32,6 +32,9 @@ int sockfd;
 
 /* host for 301 redirect */
 char *host;
+
+/* request path for 301 redirect */
+char *reqpath;
 
 /* HTTP Content-Type Structure*/
 struct contype
@@ -89,7 +92,7 @@ int main(int argc, char const* argv[])
     {
         addrlen=sizeof(struct sockaddr_in);
         clients[slot] = accept(sockfd, (struct sockaddr *) &clientaddr, &addrlen);
-
+        
         if(clients[slot] < 0)
         {
             fprintf(stderr,"accept error\n");
@@ -100,19 +103,18 @@ int main(int argc, char const* argv[])
             if(fork() == 0)
             {
                 char *respath=parseReq(slot, docroot);
-    			
+                
                 int respm = checkResource(respath);
-
+                
                 respond(clients[slot], respm, respath);
-
-
+                
                 shutdown (clients[slot], SHUT_RDWR);
                 close(slot);
                 clients[slot] = -1;
                 exit(0);
             }
         }
-
+        
         /* reuse clients */
         while(clients[slot] != -1)
         {
@@ -123,6 +125,7 @@ int main(int argc, char const* argv[])
     return 0;
 }
 
+/* Start web server listen on port */
 void startServer(char *port)
 {
     struct addrinfo hints, *result, *respt;
@@ -131,7 +134,7 @@ void startServer(char *port)
     
     hints.ai_flags = AI_PASSIVE;        /* For wildcard IP address */
     hints.ai_family = AF_INET;          /* Allow IPv4 */ 
-    hints.ai_socktype = SOCK_STREAM;     /* stream socket */
+    hints.ai_socktype = SOCK_STREAM;    /* stream socket */
 	hints.ai_protocol = 0;          	/* Any protocol */    
 
 	int s = getaddrinfo(NULL, port, &hints, &result); 
@@ -152,7 +155,7 @@ void startServer(char *port)
 	    {
 	        continue;
         }
-
+        
         /* Success */
 	    if (bind(sockfd, respt->ai_addr, respt->ai_addrlen) == 0) 
 	    {
@@ -180,6 +183,7 @@ void startServer(char *port)
     }
 }
 
+/* parse client request to split host and resource path from url, return fullpath content docroot and resource path */
 char* parseReq(int clientfd, char *docroot)
 {
     char message[99999], *reqline[4];
@@ -198,16 +202,16 @@ char* parseReq(int clientfd, char *docroot)
     }
     else
     {
-        reqline[0] = strtok(message, " \t\n");          /* HTTP method */
-
+        reqline[0] = strtok(message, " \t\n");          /* get HTTP method */
+        
         /* we only support GET method in myweb */
         if(strncmp(reqline[0], "GET\0", 4) == 0)
         {
             reqline[1] = strtok(NULL, " \t");           /* get request resource path */
-            reqline[2] = strtok(NULL, " \t\n");         /* HTTP protocol */
+            reqline[2] = strtok(NULL, " \t\n");         /* get HTTP protocol */
             strtok(NULL," \t");                         /* parse "HOST:" */
             reqline[3] = strtok(NULL, " \t\n");         /* get host content */
-
+            
             /* remove string after question mark in resource path */
             char *ques;
             ques = strchr(reqline[1], '?');
@@ -215,31 +219,14 @@ char* parseReq(int clientfd, char *docroot)
             {
                 *ques = '\0';
             }
-
-            /* default file is index.html */
-            if(strncmp(reqline[1], "/\0", 2) == 0)
-            {
-                reqline[1] = "/index.html";
-            }
-
-            //fprintf(stdout,"%s\n",reqline[0]);
-            //fprintf(stdout,"%s\n",reqline[1]);
-            //fprintf(stdout,"%s\n",reqline[2]);
-
-
-            /* get last entry from resource path */
-            char *lastentry = strrchr(reqline[1], '/') ;
-            int entrylen = strlen(lastentry);                   /* get last entry length */
-            //char *reqpath = malloc(reslen-entrylen+1);          /* request path is resource path without last entry */
-            //strncpy(reqpath, reqline[1], reslen-entrylen+1);    /* get request path */
-            //reqpath[reslen-entrylen] = '\0';                    /* end with '\0' */
-
-            //fprintf(stdout, "lastentry: %s\n", lastentry);
-            //fprintf(stdout, "reqpath: %s\n", reqpath);
+            
+            int hostlen = strlen(reqline[3]);
+            reqline[3][hostlen-1]='\0';
             
             host = reqline[3];
+            reqpath = reqline[1];
+            
             char *fullpath = strcat(docroot, reqline[1]);
-            fprintf(stdout, "fullpath: %s\n", fullpath);
 	        return fullpath;
         }
     }
@@ -247,6 +234,7 @@ char* parseReq(int clientfd, char *docroot)
 	return NULL;
 }
 
+/* return 0 if given path is a regular file, 1 if directory, else -1 */
 int regDir(char *path)
 {
     /* get request file stat */
@@ -258,15 +246,11 @@ int regDir(char *path)
 
     if(S_ISREG(filestat.st_mode))           /* request file is a regular file */
     {
-        fprintf(stdout,"%s is a regural file\n",path);
 	    return 0;
     }
     else if(S_ISDIR(filestat.st_mode))      /* request file is a directory */
     {
-        fprintf(stdout,"%s is a directory\n",path);
 	    return 1;
-        /* 檢查有 slash 可以處理 301 */
-        /* call getDirResource() 處理有 index.html 和沒有的情況 */
     } 
 
 	return -1;
@@ -286,20 +270,19 @@ int checkResource(char *path)
     return 0;
 }
 
+/* respond 403 if not exist, 404 if can't access ( only for regular file, INTENTIONALLY in this homework) */
 void respond(int clientfd, int respm, char *path)
 {
     char buffer[1024];
     
     if(respm == -1)	/* not exist */
 	{
-        fprintf(stderr,"403 FORBIDDEN\n");
         sprintf(buffer,"HTTP/1.1 403 Forbidden\nContent-Type: text/html\n\n<h1>403 Forbidden</h1>\n");
         send(clientfd, buffer, strlen(buffer), 0);
         return;
     }
     else if(respm == -2)	/* exist but not readable */
     {
-        fprintf(stderr,"404 NOT FOUND\n");
         sprintf(buffer,"HTTP/1.1 404 Not Found\nContent-Type: text/html\n\n<h1>404 Not Found</h1>\n");
 	    send(clientfd, buffer, strlen(buffer), 0);
         return;
@@ -319,12 +302,14 @@ void respond(int clientfd, int respm, char *path)
 
 }
 
+/* respond 200 and correct content-type to client */
 void respondReg(int clientfd, char *path)
 {
     int i, resfd, bytes_read, extlen, pathlen=strlen(path);
     char *resext = (char *)0;
 	char buffer[1024];
 
+    /* get resource content-type */
     for(i = 0; extensions[i].ext != 0; i++)
     {
         extlen = strlen(extensions[i].ext);
@@ -344,7 +329,7 @@ void respondReg(int clientfd, char *path)
     {
         sprintf(buffer,"HTTP/1.1 200 OK\nContent-Type: %s\n\n", resext);
         send(clientfd, buffer, strlen(buffer), 0);
-
+        
 	    if ((resfd=open(path, O_RDONLY)) != -1)
 	    {
 	        while ((bytes_read=read(resfd, buffer, 1024)) > 0 )
@@ -355,20 +340,107 @@ void respondReg(int clientfd, char *path)
     }
 }
 
+/* if request path not end with / respond 301, if dir have index.html respond 200, else  respond ls -lan result */
 void respondDir(int clientfd, char *path)
 {
     char buffer[1024];
+    int resfd, bytes_read;
 
     /* check whether resource path end with '/' */
     int reslen = strlen(path);
     if(path[reslen-1] == '/')
     {
+        char *indexpath = malloc(strlen(path)+10);
         
+        strcpy(indexpath, path);
+        strcat(indexpath, "index.html");
+        
+        /* check index.html state */
+        int indexpm = checkResource(indexpath);
+        
+        if(indexpm == 0)    /* can read */
+        {
+            sprintf(buffer,"HTTP/1.1 200 OK\nContent-Type: text/html\n\n");
+            send(clientfd, buffer, strlen(buffer), 0);
+            
+            if ((resfd=open(indexpath, O_RDONLY)) != -1)
+            {
+                while ((bytes_read=read(resfd, buffer, 1024)) > 0 )
+                {
+                    send(clientfd, buffer, bytes_read, 0);
+                }
+            }
+            
+        }
+        if(indexpm == -1)	/* not exist */
+        {
+            /* list file in dir */
+            sprintf(buffer,"HTTP/1.1 200 OK\nContent-Type: text/html\n\n");
+            send(clientfd, buffer, strlen(buffer), 0);
+            
+            sprintf(buffer, "<html>\n<head>\n<meta http-equiv=\"content-type\" content=\"text/html; charset==utf-8\"/>\n");
+            send(clientfd, buffer, strlen(buffer), 0);
+            
+            sprintf(buffer, "<style>\nbody {\n\tfont-family: monospace;\n\twhite-space: pre;\n}</style>\n");
+            send(clientfd, buffer, strlen(buffer), 0);
+            
+            sprintf(buffer, "</head>\n<body>\n<hr/>\n");
+            send(clientfd, buffer, strlen(buffer), 0);
+            
+            char cmd[1024]="/bin/ls -lan ";
+            strcat(cmd, path);
+            FILE *fp = popen(cmd, "r");
+            
+            if(fp == NULL)
+            {
+                fprintf(stderr, "command run error.");
+                return;
+            }
+            
+            int firstline=1;
+            
+            while (fgets(buffer, sizeof(buffer)-1, fp) != NULL)
+            {
+                if(firstline==1)
+                {
+                    firstline=0;
+                    continue;
+                }
+                
+                /* get last entry */
+                int bufferlen = strlen(buffer);
+                char *filenam = strrchr(buffer, ' ') ;
+                int namlen = strlen(filenam);                       /* get filenam length */
+                filenam[namlen-1]='\0';
+                char *prefix = malloc(bufferlen-namlen+1);          /* ls -la result without filenam */
+                
+                strncpy(prefix, buffer, bufferlen-namlen+1);     /* get prefix */
+                prefix[bufferlen-namlen] = '\0';                    /* end with '\0' */
+                
+                char* fileinfo;
+                fileinfo = strcat(prefix, "<a href=\"");
+                fileinfo = strcat(fileinfo, filenam);
+                fileinfo = strcat(fileinfo, "\">");
+                fileinfo = strcat(fileinfo, filenam);
+                fileinfo = strcat(fileinfo, "</a>\n");
+                send(clientfd, fileinfo, strlen(fileinfo), 0);
+            }
+            
+            pclose(fp);
+            
+            sprintf(buffer, "<hr/>\n</body>\n</html>\n");
+            send(clientfd, buffer, strlen(buffer), 0);
+        }
+        else if(indexpm == -2)	/* exist but not readable */
+        {
+            sprintf(buffer,"HTTP/1.1 403 Forbidden\nContent-Type: text/html\n\n<h1>403 Forbidden</h1>\n");
+            send(clientfd, buffer, strlen(buffer), 0);
+            return;
+        }
     }
     else
     {
-        sprintf(buffer,"HTTP/1.1 301 Moved Permanently\nContent-Type: text/html\nLocation: http://%s%s/\n\n<h1>301 Moved Permanently</h1>",host,path);
+        sprintf(buffer,"HTTP/1.1 301 Moved Permanently\nContent-Type: text/html\nLocation: http://%s%s/\n\n<h1>301 Moved Permanently</h1>",host,reqpath);
         send(clientfd, buffer, strlen(buffer), 0);
-    }
-    
+    } 
 }

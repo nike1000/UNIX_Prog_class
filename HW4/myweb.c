@@ -20,9 +20,10 @@
 void startServer(char *);
 char* parseReq(int, char *);
 int regDir(char *);
-int getResource(char *);
+int checkResource(char *);
 void respond(int, int, char *);
-
+void respondReg(int, char *);
+void respondDir(int, char *);
 /* clients[] is used to save socket file descriptors from client connect */
 int clients[MAXCONN];
 
@@ -45,7 +46,7 @@ struct contype extensions[]={
     {"jpg" , "image/jpeg"},
     {"jpeg", "image/jpeg"},
     {"ogg" , "audio/ogg" },
-    {"mp4" ,"vedio/mpeg4"},
+    {"mp4" , "video/mp4" },
     {0, 0},
 };
 
@@ -97,24 +98,9 @@ int main(int argc, char const* argv[])
             {
                 char *respath=parseReq(slot, docroot);
     			
-                int isdir=regDir(respath);
-                int resfd;
+                int respm = checkResource(respath);
 
-                if(isdir == -1)
-	            {
-	                fprintf(stderr,"resource is not dir or reg file");
-	                //respond()
-                }
-	            else if(isdir == 1)		/* request resource is Directory */
-	            {
-	                //resfd=getDirResource(respath);
-	            }
-	            else					/* request resource is regular file */
-	            {
-	                resfd=getResource(respath);
-                }
-
-                respond(clients[slot], resfd, respath);
+                respond(clients[slot], respm, respath);
 
 
                 shutdown (clients[slot], SHUT_RDWR);
@@ -231,9 +217,9 @@ char* parseReq(int clientfd, char *docroot)
                 reqline[1] = "/index.html";
             }
 
-            fprintf(stdout,"%s\n",reqline[0]);
-            fprintf(stdout,"%s\n",reqline[1]);
-            fprintf(stdout,"%s\n",reqline[2]);
+            //fprintf(stdout,"%s\n",reqline[0]);
+            //fprintf(stdout,"%s\n",reqline[1]);
+            //fprintf(stdout,"%s\n",reqline[2]);
 
             /* check whether resource path end with '/' */
             int reslen = strlen(reqline[1]);
@@ -278,14 +264,12 @@ int regDir(char *path)
     if(S_ISREG(filestat.st_mode))           /* request file is a regular file */
     {
         fprintf(stdout,"%s is a regural file",path);
-	    return 1;
-        /* 如果不是資料夾 直接 call getResource() */
-        /* 檢查檔案或資料夾是否存在與是否能存取，這裡處理掉 403/404 */
+	    return 0;
     }
     else if(S_ISDIR(filestat.st_mode))      /* request file is a directory */
     {
         fprintf(stdout,"%s is a directory",path);
-	    return 0;
+	    return 1;
         /* 檢查有 slash 可以處理 301 */
         /* call getDirResource() 處理有 index.html 和沒有的情況 */
     } 
@@ -293,64 +277,90 @@ int regDir(char *path)
 	return -1;
 }
 
-int getResource(char *path)
+int checkResource(char *path)
 {
     if(access(path, F_OK) == -1)        /* file not exist */
     {
-        return -2;
+        return -1;
     }
     else if(access(path, R_OK) == -1)   /* file exist but not allow read access */
     {
-        return -3;
+        return -2;
     }
-	else
-	{
-	    return open(path, O_RDONLY);
-	}
+
+    return 0;
 }
 
-void respond(int clientfd, int resfd, char *path)
+void respond(int clientfd, int respm, char *path)
 {
     char buffer[1024];
     
-    if(resfd == -1)			/* exist and readable but open error */
-    {
-	    
-    }
-    else if(resfd == -2)	/* not exist */
+    if(respm == -1)	/* not exist */
 	{
+        fprintf(stderr,"403 FORBIDDEN\n");
         sprintf(buffer,"HTTP/1.1 403 FORBIDDEN\n");
         send(clientfd, buffer, strlen(buffer), 0);
+        return;
     }
-    else if(resfd == -3)	/* exist but not readable */
+    else if(respm == -2)	/* exist but not readable */
     {
+        fprintf(stderr,"404 NOT FOUND\n");
         sprintf(buffer,"HTTP/1.1 404 NOT FOUND\n");
 	    send(clientfd, buffer, strlen(buffer), 0);
+        return;
     }
-    else					/* exist and readable */
-	{
-	    int i, extlen, pathlen=strlen(path);
-        char *resext = (char *)0;
+	
+    /* exist and readable */
+    int isdir = regDir(path);
 
-	    for(i = 0; extensions[i].ext != 0; i++)
+    if(isdir == 0)          /* request resource is regural file */
+    {
+        respondReg(clientfd, path);
+    }
+    else if(isdir == 1)     /* request resource is directory */
+    {
+        respondDir(clientfd, path);
+    }
+
+}
+
+void respondReg(int clientfd, char *path)
+{
+    int i, resfd, bytes_read, extlen, pathlen=strlen(path);
+    char *resext = (char *)0;
+	char buffer[1024];
+
+    for(i = 0; extensions[i].ext != 0; i++)
+    {
+        extlen = strlen(extensions[i].ext);
+        if(strncmp(&path[pathlen-extlen], extensions[i].ext, extlen) == 0)
         {
-            extlen = strlen(extensions[i].ext);
-            if(strncmp(&path[pathlen-extlen], extensions[i].ext, extlen) == 0)
-            {
-                resext = extensions[i].filetype;
-                break;
+            resext = extensions[i].filetype;
+            break;
+        }
+    }
+
+    if(resext == 0)
+    {
+        sprintf(buffer,"HTTP/1.1 200 OK\n");
+        send(clientfd, buffer, strlen(buffer), 0);
+    }
+    else
+    {
+        sprintf(buffer,"HTTP/1.1 200 OK\nContent-Type: %s\n\n", resext);
+        send(clientfd, buffer, strlen(buffer), 0);
+
+	    if ((resfd=open(path, O_RDONLY)) != -1)
+	    {
+	        while ((bytes_read=read(resfd, buffer, 1024)) > 0 )
+	        {
+	            send(clientfd, buffer, bytes_read, 0);
             }
         }
-
-        if(resext == 0)
-        {
-            sprintf(buffer,"HTTP/1.1 200 OK\n");
-	        send(clientfd, buffer, strlen(buffer), 0);
-        }
-        else
-        {
-            sprintf(buffer,"HTTP/1.1 200 OK\nContent-Type: %s\n\n", resext);
-	        send(clientfd, buffer, strlen(buffer), 0);
-        }
     }
+}
+
+void respondDir(int clientfd, char *path)
+{
+
 }

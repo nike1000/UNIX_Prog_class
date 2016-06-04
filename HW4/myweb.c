@@ -350,7 +350,7 @@ void respondDir(int clientfd, char *path)
     int reslen = strlen(path);
     if(path[reslen-1] == '/')
     {
-        char *indexpath = malloc(strlen(path)+10);
+        char *indexpath = malloc(strlen(path)+strlen("index.html"));
         
         strcpy(indexpath, path);
         strcat(indexpath, "index.html");
